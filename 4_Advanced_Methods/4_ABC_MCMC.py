@@ -220,8 +220,8 @@ def calibrate_epsilon(obs_summary, obs_R, scale, n_pilot=500,
 # ============================================================
 
 def abc_mcmc(obs_summary, obs_R, scale, epsilon,
-             n_steps=20_000, burnin=5_000,
-             proposal_std=None, rng=None, verbose=True):
+             n_steps=10_000, burnin=1_000,
+             theta_init=None, proposal_std=None, rng=None, verbose=True):
     """
     ABC-MCMC chain (Marjoram et al. 2003).
 
@@ -236,25 +236,38 @@ def abc_mcmc(obs_summary, obs_R, scale, epsilon,
         rng = np.random.default_rng()
 
     if proposal_std is None:
-        # ~15% of each prior range — tuned to give ~20-30% acceptance
-        proposal_std = 0.15 * (BOUNDS[:, 1] - BOUNDS[:, 0])
+        # 4% of each prior range — small steps to avoid sticking given the
+        # sharp SL-like posterior. 15% caused near-zero acceptance rates.
+        proposal_std = 0.08 * (BOUNDS[:, 1] - BOUNDS[:, 0])
 
-    # ---- Initialise: find a starting point with distance < epsilon ----
-    print("  Searching for valid starting point...")
-    n_init_tries = 0
-    while True:
-        theta = sample_prior(rng)
-        inf_arr, rew_arr, deg_arr = simulate_replicates(*theta, R=obs_R, rng=rng)
-        sim_s = build_summary(inf_arr, rew_arr, deg_arr)
+    # ---- Initialise ----
+    if theta_init is not None:
+        # Warm start from a provided point (e.g. S4 posterior mean from Q3).
+        # Still simulate once to get the initial distance.
+        print(f"  Starting from provided theta_init: {theta_init.round(3)}")
+        theta_curr = np.array(theta_init, dtype=float)
+        inf_arr, rew_arr, deg_arr = simulate_replicates(*theta_curr, R=obs_R, rng=rng)
+        sim_s  = build_summary(inf_arr, rew_arr, deg_arr)
         d_curr = weighted_distance(sim_s, obs_summary, scale)
-        n_init_tries += 1
-        if d_curr < epsilon:
-            break
-        if n_init_tries % 50 == 0:
-            print(f"    ... {n_init_tries} tries, best distance so far: {d_curr:.4f}")
-
-    theta_curr = theta.copy()
-    print(f"  Started at theta={theta_curr}, d={d_curr:.4f} (after {n_init_tries} tries)")
+        print(f"  Initial distance: {d_curr:.4f}  (epsilon={epsilon:.4f})")
+        if d_curr >= epsilon:
+            print("  Warning: theta_init has d >= epsilon, chain will not move until "
+                  "a proposal lands inside. Consider a tighter theta_init or larger epsilon.")
+    else:
+        print("  Searching for valid starting point...")
+        n_init_tries = 0
+        while True:
+            theta = sample_prior(rng)
+            inf_arr, rew_arr, deg_arr = simulate_replicates(*theta, R=obs_R, rng=rng)
+            sim_s  = build_summary(inf_arr, rew_arr, deg_arr)
+            d_curr = weighted_distance(sim_s, obs_summary, scale)
+            n_init_tries += 1
+            if d_curr < epsilon:
+                break
+            if n_init_tries % 50 == 0:
+                print(f"    ... {n_init_tries} tries, best distance so far: {d_curr:.4f}")
+        theta_curr = theta.copy()
+    print(f"  Started at theta={theta_curr}, d={d_curr:.4f}")
 
     chain     = np.zeros((n_steps, 3))
     distances = np.zeros(n_steps)
@@ -301,33 +314,52 @@ def abc_mcmc(obs_summary, obs_R, scale, epsilon,
 # STEP 4: REJECTION ABC  (same budget, for comparison)
 # ============================================================
 
-def rejection_abc(obs_summary, obs_R, scale, epsilon, n_draws, rng=None):
+def rejection_abc(obs_summary, obs_R, scale, n_draws, accept_frac=0.01, rng=None):
     """
-    Run rejection ABC with the same number of simulations as the MCMC chain.
-    Accepts all draws with distance < epsilon (same threshold).
+    Rejection ABC keeping the top accept_frac of draws by distance.
+    Uses the same n_draws as the MCMC chain for a fair budget comparison.
     """
     if rng is None:
         rng = np.random.default_rng()
 
-    accepted = []
-    n_accepted = 0
+    params, dists = [], []
     for _ in range(n_draws):
         theta = sample_prior(rng)
         inf_arr, rew_arr, deg_arr = simulate_replicates(*theta, R=obs_R, rng=rng)
         sim_s = build_summary(inf_arr, rew_arr, deg_arr)
         d = weighted_distance(sim_s, obs_summary, scale)
-        if d < epsilon:
-            accepted.append(theta)
-            n_accepted += 1
+        params.append(theta)
+        dists.append(d)
 
-    acc_rate = n_accepted / n_draws
-    samples  = np.array(accepted) if accepted else np.empty((0, 3))
-    return samples, acc_rate
+    params = np.array(params)
+    dists  = np.array(dists)
+    n_keep = max(1, int(accept_frac * n_draws))
+    idx    = np.argsort(dists)[:n_keep]
+    return params[idx], n_keep / n_draws
 
 
 # ============================================================
 # PLOTS
 # ============================================================
+
+def plot_posterior(samples, param_names=("β", "γ", "ρ")):
+    prior_bounds = [(0.05, 0.50), (0.02, 0.20), (0.0, 0.8)]
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+    for j, (name, (lo, hi)) in enumerate(zip(param_names, prior_bounds)):
+        axes[j].hist(samples[:, j], bins=30, density=True,
+                     color="steelblue", alpha=0.75)
+        axes[j].axhline(1.0 / (hi - lo), color="gray", linestyle="--",
+                        lw=1, label="prior")
+        axes[j].set_xlim(lo, hi)
+        axes[j].set_xlabel(name, fontsize=12)
+        axes[j].set_ylabel("Density")
+        axes[j].set_title(f"Posterior of {name}")
+        axes[j].legend(fontsize=8)
+    fig.suptitle(f"ABC-MCMC posterior (n={len(samples)} post-burnin samples)", fontsize=11)
+    plt.tight_layout()
+    plt.savefig("mcmc_posterior.png", dpi=150, bbox_inches="tight")
+    plt.show()
+
 
 def plot_trace(chain, burnin, param_names=("β", "γ", "ρ")):
     fig, axes = plt.subplots(3, 1, figsize=(12, 6), sharex=True)
@@ -412,8 +444,9 @@ def run(
     n_scale_sims=200,
     n_pilot=500,
     epsilon_quantile=0.10,
-    n_steps=20_000,
-    burnin=5_000,
+    epsilon=None,           # set this after first run to skip pilot calibration
+    n_steps=10_000,
+    burnin=1_000,
     seed=42,
 ):
     rng = np.random.default_rng(seed)
@@ -436,51 +469,47 @@ def run(
     scale = estimate_scale(obs_R, n_sims=n_scale_sims, rng=rng)
     print(f"  Scale: {scale.round(4)}")
 
-    # ---- Calibrate epsilon ----
-    print(f"\nCalibrating epsilon ({n_pilot} pilot draws, {epsilon_quantile*100:.0f}th percentile)...")
-    epsilon = calibrate_epsilon(obs_summary, obs_R, scale,
-                                n_pilot=n_pilot, quantile=epsilon_quantile, rng=rng)
-    print(f"  epsilon = {epsilon:.4f}")
+    # ---- Calibrate epsilon (skip if hardcoded) ----
+    if epsilon is None:
+        print(f"\nCalibrating epsilon ({n_pilot} pilot draws, {epsilon_quantile*100:.0f}th percentile)...")
+        epsilon = calibrate_epsilon(obs_summary, obs_R, scale,
+                                    n_pilot=n_pilot, quantile=epsilon_quantile, rng=rng)
+        print(f"  epsilon = {epsilon:.4f}  <-- hardcode this in run() to skip next time")
+    else:
+        print(f"\nUsing hardcoded epsilon = {epsilon:.4f}")
 
     # ---- ABC-MCMC ----
-    print(f"\nRunning ABC-MCMC ({n_steps} steps, burn-in={burnin})...")
+    # Warm start from S4 posterior mean (Q3 result): β≈0.20, γ≈0.08, ρ≈0.30.
+    # This is principled — it comes from a separate ABC run, not from the chain
+    # itself — and avoids wasting steps searching for a valid starting point.
+    theta_init = np.array([0.20, 0.08, 0.30])
+    print(f"\nRunning ABC-MCMC ({n_steps} steps, burn-in={burnin}, "
+          f"warm start from S4 posterior mean)...")
     mcmc_post, chain, distances, mcmc_acc_rate = abc_mcmc(
         obs_summary, obs_R, scale, epsilon,
-        n_steps=n_steps, burnin=burnin, rng=rng,
+        n_steps=n_steps, burnin=burnin,
+        theta_init=theta_init, rng=rng,
     )
     print(f"\n  ABC-MCMC acceptance rate: {mcmc_acc_rate:.3f}")
 
-    # ---- Rejection ABC (same budget) ----
-    # Use (n_steps - burnin) draws to match the post-burnin MCMC cost
-    n_rej = n_steps - burnin
-    print(f"\nRunning rejection ABC ({n_rej} draws, same epsilon)...")
-    rej_post, rej_acc_rate = rejection_abc(
-        obs_summary, obs_R, scale, epsilon, n_draws=n_rej, rng=rng
-    )
-    print(f"  Rejection ABC acceptance rate: {rej_acc_rate:.3f}")
-    print(f"  Rejection ABC accepted samples: {len(rej_post)}")
-
     # ---- Summaries ----
     print_summary("ABC-MCMC (post burn-in)", mcmc_post)
-    print_summary("Rejection ABC", rej_post)
 
     # ---- Plots ----
     print("\nGenerating plots...")
     plot_trace(chain, burnin)
     plot_distance_trace(distances, epsilon, burnin)
-    plot_comparison(mcmc_post, rej_post)
+    plot_posterior(mcmc_post)
 
     return {
         "mcmc_posterior":  mcmc_post,
-        "rej_posterior":   rej_post,
         "chain":           chain,
         "distances":       distances,
         "epsilon":         epsilon,
         "mcmc_acc_rate":   mcmc_acc_rate,
-        "rej_acc_rate":    rej_acc_rate,
         "scale":           scale,
     }
 
 
 if __name__ == "__main__":
-    results = run()
+    results = run(epsilon=1.7962, n_steps=500, burnin=100)

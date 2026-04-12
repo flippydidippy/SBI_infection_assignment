@@ -119,13 +119,9 @@ def make_observed_arrays(infected_df, rewiring_df, degree_df):
 # SUMMARY STATISTICS
 # ============================================================
 
-def build_summary_vector(infected_arr, rewiring_arr, degree_arr, time_stride=10):
-    mean_infected = infected_arr.mean(axis=0)
-    mean_rewiring = rewiring_arr.mean(axis=0)
-    mean_degree   = degree_arr.mean(axis=0)
-    infected_sub  = mean_infected[::time_stride]
-    rewiring_sub  = mean_rewiring[::time_stride]
-    return np.concatenate([infected_sub, rewiring_sub, mean_degree])
+def build_summary_vector(infected_arr, *_, time_stride=10):
+    """S1: infected fraction curve (downsampled)."""
+    return infected_arr.mean(axis=0)[::time_stride]
 
 
 def weighted_distance(sim_summary, obs_summary, scale):
@@ -218,13 +214,17 @@ def rejection_abc(obs_summary, obs_R, scale,
 # ============================================================
 
 def plot_posterior_histograms(samples):
-    names = [r"$\beta$", r"$\gamma$", r"$\rho$"]
+    names  = [r"$\beta$", r"$\gamma$", r"$\rho$"]
+    bounds = [(0.05, 0.50), (0.02, 0.20), (0.0, 0.8)]
     fig, axes = plt.subplots(1, 3, figsize=(14, 4))
-    for j in range(3):
+    for j, (lo, hi) in enumerate(bounds):
         axes[j].hist(samples[:, j], bins=30, density=True)
+        axes[j].axhline(1.0 / (hi - lo), color="gray", linestyle="--", linewidth=1, label="prior")
+        axes[j].set_xlim(lo, hi)
         axes[j].set_title(f"Posterior of {names[j]}")
         axes[j].set_xlabel(names[j])
         axes[j].set_ylabel("Density")
+        axes[j].legend(fontsize=8)
     plt.tight_layout()
     plt.show()
 
