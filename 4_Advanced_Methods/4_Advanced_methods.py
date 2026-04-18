@@ -692,14 +692,14 @@ def plot_posterior_widths(raw_params, adj_params, mcmc_post,
     x      = np.arange(3)
     width  = 0.25
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(x - width, raw_norm,  width, label="Rejection ABC (5%)", color="steelblue",  alpha=0.85)
-    ax.bar(x,         adj_norm,  width, label="Reg. adjusted",       color="darkorange", alpha=0.85)
-    ax.bar(x + width, mcmc_norm, width, label="ABC-MCMC",            color="seagreen",   alpha=0.85)
+    ax.bar(x - width, raw_norm,  width, label="Rejection ABC (1%)", color="darkorange", alpha=0.85)
+    ax.bar(x,         adj_norm,  width, label="Reg. adjustment",    color="seagreen",   alpha=0.85)
+    ax.bar(x + width, mcmc_norm, width, label="ABC-MCMC",           color="steelblue",  alpha=0.85)
     ax.axhline(1.0, color="black", ls="--", lw=1, label="Prior (baseline)")
     ax.set_xticks(x)
     ax.set_xticklabels(names, fontsize=12)
     ax.set_ylabel("Posterior std / Prior std  (lower = more informative)")
-    ax.set_title("Information gain: all three advanced methods (S4)")
+    ax.set_title("Information gain (S4)")
     ax.legend()
     plt.tight_layout()
     plt.savefig(save, dpi=150, bbox_inches="tight")
@@ -724,7 +724,7 @@ def plot_beta_rho_correlation(rej_post, adj_post, mcmc_post,
         ax.set_xlabel("β", fontsize=12)
         ax.set_ylabel("ρ", fontsize=12)
         ax.set_title(f"{label}\nr(β, ρ) = {corr:.3f}")
-    fig.suptitle("Joint β–ρ posterior — all three advanced methods", fontsize=11)
+    fig.suptitle("Joint β–ρ posterior", fontsize=11)
     plt.tight_layout()
     plt.savefig(save, dpi=150, bbox_inches="tight")
     plt.close()
@@ -770,8 +770,7 @@ def plot_comparison(rej_post, adj_post, mcmc_post,
         if j == 0:
             ax.legend(fontsize=8)
 
-    fig.suptitle("Advanced methods comparison — Rejection ABC, Regression adjustment, ABC-MCMC",
-                 fontsize=11)
+    fig.suptitle("Advanced methods comparison (S4)", fontsize=11)
     plt.tight_layout()
     plt.savefig(save, dpi=150, bbox_inches="tight")
     plt.close()
@@ -792,8 +791,8 @@ def run(
     epsilon_quantile=0.002,    # 0.2th percentile for MCMC — much tighter than rejection ABC's 1%
     n_steps=20_000,            # ABC-MCMC chain length
     burnin=5_000,
-    n_rej_draws=5_000,         # rejection ABC budget (matches Q3)
-    n_rej_keep=5_000,          # keep top 1% = 50 samples
+    n_rej_draws=20_000,        # rejection ABC budget
+    n_rej_keep=20_000,         # keep top 1% = 200 samples
     seed=42,
 ):
     rng = np.random.default_rng(seed)
@@ -880,6 +879,8 @@ def run(
 
     # ---- 7. Plots ----
     print("\nGenerating plots...")
+    plot_trace(chain, burnin)
+    plot_distance_trace(distances, epsilon_mcmc, burnin)
     plot_autocorrelation(mcmc_post)
     plot_raw_vs_adjusted(raw5_post, adj_post, reg_diag)
     plot_posterior_widths(raw5_post, adj_post, mcmc_post)
