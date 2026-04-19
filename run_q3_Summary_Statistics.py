@@ -1,6 +1,34 @@
+"""
+Question 3: Summary Statistics Design
+
+This script studies how the choice of summary statistics affects ABC-based
+recovery of the adaptive-network SIR parameters (beta, gamma, rho). It builds
+on the baseline simulator and data-processing pipeline from Question 2, and
+compares several candidate summary sets ranging from the infected curve alone
+to compact hand-crafted scalar summaries.
+
+Main steps
+----------
+1. Load and preprocess the observed infected-fraction, rewiring, and degree data.
+2. Define and evaluate four candidate summary sets:
+   S1 = infected curve only,
+   S2 = infected + rewiring curves,
+   S3 = infected + rewiring + degree histogram,
+   S4 = compact scalar summaries.
+3. Generate one-at-a-time sensitivity plots to assess how informative each
+   summary component is for each parameter.
+4. Run rejection ABC under each summary set using standardised Euclidean distance.
+5. Compare the resulting posteriors using marginal, joint, width, and
+   beta-rho confounding plots.
+
+As in the report, the goal is not only to improve posterior concentration, but
+also to understand which summaries genuinely help identify the parameters of
+interest and which may add weak or noisy dimensions.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
-from basic_ABC import (
+from run_q2_Basic_Rejection_ABC import (
     simulate_fast,
     _simulate_replicates_parallel,
     simulate_replicates_fast,

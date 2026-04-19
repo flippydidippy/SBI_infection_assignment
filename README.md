@@ -1,6 +1,6 @@
 # SBI Infection Assignment
 
-Simulation-Based Inference coursework for **ST3247**, focused on parameter recovery in a stochastic **SIR** epidemic model evolving on an adaptive contact network.
+Simulation-Based Inference (SBI) coursework for **ST3247**, focused on recovering epidemic parameters in a stochastic **SIR** model evolving on an adaptive contact network.
 
 ## Overview
 
@@ -10,176 +10,217 @@ This repository studies inference for the unknown parameter triple
 - `gamma`: recovery probability,
 - `rho`: rewiring probability,
 
-using partially observed epidemic data from an adaptive-network SIR model.
+using partially observed epidemic data generated from an adaptive-network SIR model.
 
 The observed data consist of
 
 - infected fraction over time,
-- rewiring counts over time, and
+- rewiring counts over time,
 - final degree histograms.
 
-The repository is organised to follow the structure of the report itself, so that each main directory corresponds closely to a major section of the write-up and can be run and inspected on its own.
+The repository is organised around the workflow of the report itself:
 
-## Repository structure
+- **Q2**: baseline rejection ABC,
+- **Q3**: summary-statistic design,
+- **Q4**: advanced methods,
+- **additional tools**: robustness checks, synthetic validation, and visualisation.
+
+A useful design feature of this repository is that the main scripts remain straightforward to inspect and run, while shared components are reused where this improves consistency. In particular:
+
+- `run_q3_Summary_Statistics.py` builds directly on the simulator and data-loading pipeline from `run_q2_Basic_Rejection_ABC.py`,
+- `run_q4_Advanced_Methods.py` reuses the Q2 simulator and the Q3 `S4` summary statistic,
+- and additional experiments are collected under `additional_tools/` rather than being mixed into the main analysis scripts.
+
+Overall, this gives the repository a good balance between **clarity by analysis stage** and **reuse of common functionality**.
+
+## Current repository layout
 
 ```text
 SBI_infection_assignment/
-├── 2_Basic_Rejection_ABC/
-│   └── 2_basic_ABC.py
-├── 3_Summary_Statistics/
-│   └── 3_summary_statistics.py
-├── 4_Advanced_Methods/
-│   ├── 4_ABC_MCMC.py
-│   ├── 4a.py
-│   └── 4d.py
+├── additional_tools/
+│   ├── robustness_study.py
+│   ├── synthetic_validation.py
+│   └── visual_demo_org_simulator.py
 ├── archive/
 │   ├── fast_simulator_test/
 │   ├── original_simulator/
-│   └── old_4_Advanced_methods.py
+│   └── old_4_ABC_MCMC.py
 ├── data/
 │   ├── final_degree_histograms.csv
 │   ├── infected_timeseries.csv
 │   └── rewiring_timeseries.csv
-├── figures/
-│   ├── q2/
-│   ├── q3/
-│   └── q4/
 ├── results/
+│   ├── figures/
+│   │   ├── q2/
+│   │   ├── q3/
+│   │   ├── q4/
+│   │   └── synthetic_validation.png
 │   └── robustness/
 │       ├── posterior_movement.csv
 │       ├── robustness_summary.csv
 │       └── run_config.json
-├── tools/
-│   ├── robustness_study.py
-│   ├── synthetic_validation.py
-│   └── visual_demo_org_simulator.py
 ├── README.md
-└── requirements.txt
+├── requirements.txt
+├── run_q2_Basic_Rejection_ABC.py
+├── run_q3_Summary_Statistics.py
+├── run_q4_Advanced_Methods.py
+├── run_q4a_LLRA.py
+└── run_q4d_ABC_MCMC.py
 ```
 
-## What each part does
+## What each file or folder does
 
-### `2_Basic_Rejection_ABC/`
-Contains the baseline rejection ABC implementation used in the first main inference section of the report.
+### `run_q2_Basic_Rejection_ABC.py`
+Baseline rejection-ABC workflow.
 
-- `2_basic_ABC.py` runs the basic rejection ABC pipeline on the observed data and produces the baseline posterior results.
+This script contains the fast Numba-based simulator, the observed-data loading and preprocessing pipeline, the `S1` summary statistic, prior sampling, scale estimation, rejection ABC, and posterior plots. It is the main script for the Q2 baseline analysis.
 
-### `3_Summary_Statistics/`
-Contains the summary-statistic design and comparison code.
+### `run_q3_Summary_Statistics.py`
+Summary-statistic design and comparison.
 
-- `3_summary_statistics.py` compares alternative summary statistics and studies how the choice of summaries affects posterior recovery and parameter identifiability.
+This script reuses the Q2 simulator and data-loading code, then defines and compares the candidate summary sets `S1`–`S4`. It generates sensitivity plots and posterior comparisons to show which summaries are most informative for `beta`, `gamma`, and `rho`.
 
-### `4_Advanced_Methods/`
-Contains the more advanced inference methods developed after the basic ABC baseline.
+### `run_q4_Advanced_Methods.py`
+Combined Q4 advanced-methods workflow.
 
-- `4a.py` implements the regression-adjustment part of the advanced methods section.
-- `4_ABC_MCMC.py` implements the ABC-MCMC approach.
-- `4d.py` implements the synthetic-likelihood / advanced comparison component used in the later part of the analysis.
+This script is the most integrated version of the advanced analysis. It explicitly reuses:
 
-### `archive/`
-Contains older, exploratory, or superseded material that was kept for transparency but separated from the main workflow.
+- the **Q2 simulator** and observed-data pipeline, and
+- the **Q3 `S4` summary statistic**,
 
-- `fast_simulator_test/` contains development or checking material related to simulator speed-ups.
-- `original_simulator/` stores the older reference simulator material.
-- `old_4_Advanced_methods.py` is an earlier combined advanced-methods script retained for record-keeping.
+before adding the advanced inference machinery, including ABC-MCMC, a same-budget rejection-ABC comparison, regression adjustment, diagnostics, and plotting.
 
-This folder is not part of the main submission workflow, but is kept as supporting development history.
+### `run_q4a_LLRA.py`
+Standalone local linear regression adjustment (LLRA) workflow.
+
+This file focuses on the Beaumont-style regression-adjustment analysis. It is useful when running or inspecting the LLRA component separately from the larger Q4 script.
+
+### `run_q4d_ABC_MCMC.py`
+Standalone advanced MCMC-based workflow.
+
+This file contains the more specialised Q4 MCMC-based analysis and is kept separately from the combined script for ease of inspection and reproducibility.
+
+## Supporting folders
 
 ### `data/`
-Contains the observed datasets used by the inference scripts.
+Observed datasets used throughout the analysis.
 
-- `infected_timeseries.csv`: infected fraction trajectories across replicates.
-- `rewiring_timeseries.csv`: rewiring-count trajectories across replicates.
+- `infected_timeseries.csv`: infected-fraction trajectories across replicates,
+- `rewiring_timeseries.csv`: rewiring-count trajectories across replicates,
 - `final_degree_histograms.csv`: final degree distributions across replicates.
 
-### `figures/`
-Stores generated plots grouped by report section.
+### `results/`
+Saved outputs from the main workflows and supporting studies.
 
-- `q2/`: figures from the basic rejection ABC section.
-- `q3/`: figures from the summary-statistics section.
-- `q4/`: figures from the advanced-methods section.
+#### `results/figures/`
+Plots grouped by analysis stage.
 
-### `results/robustness/`
-Stores outputs from the robustness study.
+- `q2/`: figures from 2. Basic Rejection ABC,
+- `q3/`: figures from 3. Summary Statistics,
+- `q4/`: figures from 4. Advanced Methods,
+- `synthetic_validation.png`: saved synthetic-truth validation figure from 4. Advanced Methods.
 
-- `posterior_movement.csv`: movement of posterior summaries under robustness changes.
-- `robustness_summary.csv`: compact robustness summary table.
-- `run_config.json`: configuration used for the robustness run.
+#### `results/robustness/`
+Outputs from the robustness study.
 
-### `tools/`
-Contains supporting scripts used for validation, robustness checks, and simulator demonstrations.
+- `posterior_movement.csv`: movement of posterior summaries under alternative settings,
+- `robustness_summary.csv`: compact robustness summary table,
+- `run_config.json`: stored configuration for the robustness run.
 
-- `robustness_study.py` runs the robustness analysis and writes outputs to `results/robustness/`.
-- `synthetic_validation.py` runs synthetic-truth validation experiments.
-- `visual_demo_org_simulator.py` provides a simple demonstration/visualisation for the original simulator.
+### `additional_tools/`
+Supporting scripts that are useful but not part of the main section-by-section workflow.
 
-## Why some code is repeated across files
+- `robustness_study.py`: runs the robustness analysis across tolerances, seeds, proposal scales, and distance metrics,
+- `synthetic_validation.py`: runs synthetic-truth validation experiments,
+- `visual_demo_org_simulator.py`: provides a visual demonstration of the original-style simulator.
 
-Some functionality appears more than once across the main scripts. In a larger software project, this could certainly be refactored into a more modular shared package.
+### `archive/`
+Older or reference material retained for transparency.
 
-For this coursework repository, however, the main scripts were intentionally kept **largely self-contained by section**.
+This folder is not part of the main workflow, but it preserves earlier simulator checks and superseded scripts.
 
-This design was chosen for several practical reasons:
+- `fast_simulator_test/`: development and checking material related to the simulator,
+- `original_simulator/`: older reference simulator code,
+- `old_4_ABC_MCMC.py`: an earlier advanced-methods implementation retained for record-keeping.
 
-1. **Direct alignment with the report**  
-   Each major script corresponds closely to one section of the write-up, so the reader can inspect the code for that section without jumping across many files.
+## Design philosophy
 
-2. **Ease of marking and readability**  
-   A marker can open a single script and see the full workflow for that section in one place: simulator assumptions, summaries, priors, inference routine, and plotting logic.
+This branch is intentionally organised around the report workflow rather than around a deep package hierarchy.
 
-3. **Section-by-section reproducibility**  
-   Each section can be run independently. This made it easier during development to modify one method without unintentionally breaking the others.
+At the same time, it is **not** just a collection of fully isolated scripts. The code now has a clearer progression of reuse:
 
-4. **Transparency over abstraction**  
-   For an assignment submission, having the full logic visible in each main file can be clearer than hiding important steps behind a deeper import structure.
+- Q2 defines the core fast simulator and the basic data/ABC pipeline,
+- Q3 reuses those foundations and adds competing summary-statistic sets,
+- Q4 builds on both earlier stages, especially the Q2 simulator and the Q3 `S4` summary.
 
-So while the repository is not maximally refactored, the repeated code reflects a deliberate trade-off in favour of **clarity, self-containment, and report-aligned reproducibility**.
+This gives the repository three advantages:
 
-## How to run
+1. **Direct alignment with the write-up**  
+   Each main script corresponds closely to a report section.
 
-Run the main scripts from the repository root.
+2. **Reasonable code reuse without over-engineering**  
+   Shared pieces are reused where this helps clarity, but the scripts remain readable on their own.
 
-### Basic rejection ABC
+3. **Section-level reproducibility**  
+   Each major stage of the analysis can still be run independently.
+
+In short, the current structure is a deliberate compromise between **clarity**, **report alignment**, and **lightweight modularity**.
+
+## How to run the analysis
+
+Run the scripts from the repository root.
+
+### Q2: Baseline rejection ABC
 
 ```bash
-python 2_Basic_Rejection_ABC/2_basic_ABC.py
+python run_q2_Basic_Rejection_ABC.py
 ```
 
-### Summary-statistics comparison
+### Q3: Summary-statistics comparison
 
 ```bash
-python 3_Summary_Statistics/3_summary_statistics.py
+python run_q3_Summary_Statistics.py
 ```
 
-### Advanced methods
+### Q4: Combined advanced-methods workflow
 
 ```bash
-python 4_Advanced_Methods/4a.py
-python 4_Advanced_Methods/4_ABC_MCMC.py
-python 4_Advanced_Methods/4d.py
+python run_q4_Advanced_Methods.py
+```
+
+### Q4a: Local linear regression adjustment only
+
+```bash
+python run_q4a_LLRA.py
+```
+
+### Q4d: Standalone advanced MCMC workflow
+
+```bash
+python run_q4d_ABC_MCMC.py
+```
+
+### Synthetic-truth validation
+
+```bash
+python additional_tools/synthetic_validation.py
 ```
 
 ### Robustness study
 
 ```bash
-python tools/robustness_study.py
+python additional_tools/robustness_study.py
 ```
 
-### Synthetic validation
+### Original-simulator visual demo
 
 ```bash
-python tools/synthetic_validation.py
+python additional_tools/visual_demo_org_simulator.py
 ```
-
-## Outputs
-
-- Figures are stored in `figures/q2`, `figures/q3`, and `figures/q4`.
-- Robustness outputs are stored in `results/robustness/`.
-- Additional outputs depend on the individual script being run.
 
 ## Environment setup
 
-Create a virtual environment and install dependencies:
+Create and activate a virtual environment, then install the required packages.
 
 ```bash
 python -m venv .venv
@@ -187,33 +228,18 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-On Windows PowerShell:
+## Requirements
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+The current `requirements.txt` lists:
 
-## Recommended Python version
-
-Python **3.10+** is recommended.
+- `numpy>=1.24`
+- `pandas>=2.0`
+- `matplotlib>=3.7`
+- `numba>=0.58`
 
 ## Notes
 
-- The repository structure is intentionally close to the structure of the report.
-- The main scripts prioritise methodological clarity and section-level reproducibility.
-- Supporting and older material has been separated into `archive/` and `tools/` so that the primary workflow remains easy to follow.
-
----
-
-## Suggested `requirements.txt`
-
-You can copy this into `requirements.txt`:
-
-```txt
-numpy>=1.24
-pandas>=2.0
-matplotlib>=3.7
-numba>=0.58
-```
+- Python 3.10+ is recommended.
+- The repository is meant to be read alongside the report.
+- The main analysis scripts are top-level on purpose, so the primary workflows are immediately visible.
+- Supporting experiments and older development material are separated into `additional_tools/` and `archive/` to keep the main workflow cleaner.
