@@ -1,3 +1,27 @@
+"""
+Visual Demo of the Original-Style Simulator
+
+This script provides a visual and interactive demonstration of one replicate of
+the adaptive-network SIR model. Unlike the fast inference simulator, it stores
+full state and edge history so that the epidemic and network evolution can be
+inspected directly through static plots and animation.
+
+Main steps
+----------
+1. Simulate one epidemic replicate under the original three-phase update logic:
+   infection, recovery, and rewiring.
+2. Store node states, edge sets, and summary statistics at each time step.
+3. Construct a simple force-directed network layout for visualisation.
+4. Display either a static summary or a frame-by-frame animation of the
+   epidemic and the evolving contact network.
+5. Report final counts, peak infection, total rewires, and the final degree
+   histogram.
+
+This script is intended as a diagnostic and explanatory tool: it makes the
+model dynamics visible and helps validate that the simulated epidemic and
+rewiring behaviour are consistent with the intended process.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation

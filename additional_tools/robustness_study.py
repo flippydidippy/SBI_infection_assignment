@@ -1,3 +1,30 @@
+"""
+Robustness Study
+
+This script runs a robustness study for the ABC inference procedures used in the
+report. It evaluates how posterior conclusions change under different tuning
+choices, including rejection-ABC tolerance, ABC-MCMC seed and proposal scale,
+and alternative distance metrics such as Euclidean, Mahalanobis, and reweighted
+Euclidean distance.
+
+Main steps
+----------
+1. Load an external ABC module containing the simulator, prior, summary
+   statistic, and support checks.
+2. Load the observed data and construct the observed summary vector.
+3. Build a prior-predictive summary bank to calibrate distance scaling and
+   covariance-based distance metrics.
+4. Re-run rejection ABC across multiple tolerances and distance choices.
+5. Re-run ABC-MCMC across multiple seeds, proposal scales, and distance choices.
+6. Summarise posterior movement relative to baseline settings using means,
+   widths, and Wasserstein-style comparisons.
+7. Save posterior samples and robustness summaries to disk for later analysis.
+
+The goal is to assess whether the main inferential conclusions are stable to
+reasonable methodological choices, rather than artefacts of a single tuning
+configuration.
+"""
+
 import argparse
 import importlib.util
 import itertools
