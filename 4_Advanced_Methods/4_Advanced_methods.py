@@ -557,34 +557,57 @@ def plot_autocorrelation(posterior, max_lag=200, save="autocorrelation.png"):
 
 
 def _simulate_pp(post, obs_R, n_pp_samples, rng):
-    """Simulate posterior predictive trajectories from a posterior array."""
-    idx = rng.choice(len(post), size=min(n_pp_samples, len(post)), replace=False)
+    """Simulate posterior predictive trajectories from a posterior array.
+
+    Deterministic stride-based thinning is used to pick n_pp_samples parameter
+    draws from `post`. This works correctly for both independent posteriors
+    (rejection ABC, regression adjustment) and autocorrelated MCMC posteriors
+    (the stride >> autocorrelation length, so thinned draws are near-independent).
+
+    All n_pp_samples * obs_R individual replicate trajectories are returned
+    (not their means), so pointwise percentiles across the stacked rows give
+    the full posterior predictive distribution of a single future replicate —
+    i.e. parameter uncertainty + aleatory replicate noise.
+    """
+    n = min(n_pp_samples, len(post))
+    stride = max(1, len(post) // n)
+    idx = np.arange(0, len(post), stride)[:n]
     pp_params = post[idx]
+
     T = 200
-    pp_inf = np.zeros((len(idx), T + 1))
-    pp_rew = np.zeros((len(idx), T + 1))
-    pp_deg = np.zeros((len(idx), 31))
+    n_traj = len(idx) * obs_R
+    pp_inf = np.zeros((n_traj, T + 1))
+    pp_rew = np.zeros((n_traj, T + 1))
+    pp_deg = np.zeros((n_traj, 31))
     for k, (beta, gamma, rho) in enumerate(pp_params):
-        inf_arr, rew_arr, deg_arr = simulate_replicates(beta, gamma, rho, R=obs_R, rng=rng)
-        pp_inf[k] = inf_arr.mean(axis=0)
-        pp_rew[k] = rew_arr.mean(axis=0)
-        pp_deg[k] = deg_arr.mean(axis=0)
+        inf_arr, rew_arr, deg_arr = simulate_replicates(
+            beta, gamma, rho, R=obs_R, rng=rng)
+        pp_inf[k*obs_R:(k+1)*obs_R] = inf_arr
+        pp_rew[k*obs_R:(k+1)*obs_R] = rew_arr
+        pp_deg[k*obs_R:(k+1)*obs_R] = deg_arr
     return pp_inf, pp_rew, pp_deg
 
 
-def plot_posterior_predictive(mcmc_post, rej_post, inf_obs, rew_obs, deg_obs,
-                              obs_R, n_pp_samples=50, seed=0,
+def plot_posterior_predictive(mcmc_post, rej_post, adj_post, inf_obs, rew_obs, deg_obs,
+                              obs_R, n_pp_samples=200, rng=None,
                               save="posterior_predictive.png"):
     """
-    Two-row posterior predictive check:
-      Row 1 — Rejection ABC predictive bands vs observed
-      Row 2 — ABC-MCMC predictive bands vs observed
-    Tighter bands in row 2 show MCMC produces better (more precise) estimates.
+    Three-row posterior predictive check against all three observed data sources:
+      Row 1 — Rejection ABC (1%)
+      Row 2 — Regression adjustment (5%)
+      Row 3 — ABC-MCMC
+    Each row overlays the 90% predictive interval (5th–95th percentile across
+    all n_pp_samples × obs_R individual replicate trajectories) and the
+    predictive mean against the observed data.
     """
-    rng = np.random.default_rng(seed)
+    if rng is None:
+        rng = np.random.default_rng(0)
 
     print(f"  Simulating {n_pp_samples} rejection ABC posterior-predictive draws...")
     rej_inf, rej_rew, rej_deg = _simulate_pp(rej_post, obs_R, n_pp_samples, rng)
+
+    print(f"  Simulating {n_pp_samples} regression-adjusted posterior-predictive draws...")
+    adj_inf, adj_rew, adj_deg = _simulate_pp(adj_post, obs_R, n_pp_samples, rng)
 
     print(f"  Simulating {n_pp_samples} ABC-MCMC posterior-predictive draws...")
     mcmc_inf, mcmc_rew, mcmc_deg = _simulate_pp(mcmc_post, obs_R, n_pp_samples, rng)
@@ -593,53 +616,66 @@ def plot_posterior_predictive(mcmc_post, rej_post, inf_obs, rew_obs, deg_obs,
     t = np.arange(T + 1)
     deg_bins = np.arange(31)
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
-    titles   = ["Infected fraction", "Rewiring time series", "Final degree distribution"]
-    colors   = ["steelblue", "darkorange", "seagreen"]
-    row_data = [
-        (rej_inf,  rej_rew,  rej_deg,  "Rejection ABC"),
-        (mcmc_inf, mcmc_rew, mcmc_deg, "ABC-MCMC"),
+    colors    = ["darkorange", "seagreen",   "steelblue"]
+    linestyle = ["-",          "--",          "-."]
+    hatches   = ["///",        "...",         "xxx"]
+    methods = [
+        (rej_inf,  rej_rew,  rej_deg,  "Rejection ABC (1%)",   colors[0], linestyle[0], hatches[0]),
+        (adj_inf,  adj_rew,  adj_deg,  "Reg. adjustment (5%)", colors[1], linestyle[1], hatches[1]),
+        (mcmc_inf, mcmc_rew, mcmc_deg, "ABC-MCMC",             colors[2], linestyle[2], hatches[2]),
     ]
 
-    for row, (pp_i, pp_r, pp_d, label) in enumerate(row_data):
-        # Panel 1: infected fraction
-        ax = axes[row, 0]
-        for obs_row in inf_obs:
-            ax.plot(t, obs_row, color="gray", lw=0.5, alpha=0.3)
+    obs_mean_inf = inf_obs.mean(axis=0)
+    obs_mean_rew = rew_obs.mean(axis=0)
+    obs_mean_deg = deg_obs.mean(axis=0)
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    # Panel 1: infected fraction
+    ax = axes[0]
+    for obs_row in inf_obs:
+        ax.plot(t, obs_row, color="gray", lw=0.5, alpha=0.25)
+    ax.plot(t, obs_mean_inf, color="black", lw=2, label="Observed mean", zorder=5)
+    for pp_i, _, _, label, color, ls, hatch in methods:
         lo, hi = np.percentile(pp_i, 5, axis=0), np.percentile(pp_i, 95, axis=0)
-        ax.fill_between(t, lo, hi, alpha=0.4, color=colors[0], label="PP 5–95%")
-        ax.plot(t, pp_i.mean(axis=0), color=colors[0], lw=1.5, label="PP mean")
-        ax.set(xlabel="Time", ylabel="Infected fraction",
-               title=f"{label} — {titles[0]}")
-        ax.legend(fontsize=8)
+        ax.fill_between(t, lo, hi, alpha=0.18, color=color, hatch=hatch, edgecolor=color)
+        ax.plot(t, pp_i.mean(axis=0), color=color, lw=2, ls=ls, label=label)
+    ax.set(xlabel="Time", ylabel="Infected fraction", title="Infected fraction")
+    ax.legend(fontsize=8)
 
-        # Panel 2: rewiring
-        ax = axes[row, 1]
-        for obs_row in rew_obs:
-            ax.plot(t, obs_row, color="gray", lw=0.5, alpha=0.3)
+    # Panel 2: rewiring
+    ax = axes[1]
+    for obs_row in rew_obs:
+        ax.plot(t, obs_row, color="gray", lw=0.5, alpha=0.25)
+    ax.plot(t, obs_mean_rew, color="black", lw=2, label="Observed mean", zorder=5)
+    for _, pp_r, _, label, color, ls, hatch in methods:
         lo, hi = np.percentile(pp_r, 5, axis=0), np.percentile(pp_r, 95, axis=0)
-        ax.fill_between(t, lo, hi, alpha=0.4, color=colors[1], label="PP 5–95%")
-        ax.plot(t, pp_r.mean(axis=0), color=colors[1], lw=1.5, label="PP mean")
-        ax.set(xlabel="Time", ylabel="Rewire count",
-               title=f"{label} — {titles[1]}")
-        ax.legend(fontsize=8)
+        ax.fill_between(t, lo, hi, alpha=0.18, color=color, hatch=hatch, edgecolor=color)
+        ax.plot(t, pp_r.mean(axis=0), color=color, lw=2, ls=ls, label=label)
+    ax.set(xlabel="Time", ylabel="Rewire count", title="Rewiring time series")
+    ax.legend(fontsize=8)
 
-        # Panel 3: degree histogram
-        ax = axes[row, 2]
-        obs_mean_deg = deg_obs.mean(axis=0)
-        ax.bar(deg_bins, obs_mean_deg, color="gray", alpha=0.5, label="Observed mean")
-        lo, hi = np.percentile(pp_d, 5, axis=0), np.percentile(pp_d, 95, axis=0)
-        ax.fill_between(deg_bins - 0.5, lo, hi, alpha=0.4, color=colors[2],
-                        step="post", label="PP 5–95%")
-        ax.step(deg_bins - 0.5, pp_d.mean(axis=0), color=colors[2], lw=1.5,
-                where="post", label="PP mean")
-        ax.set(xlabel="Degree", ylabel="Node count",
-               title=f"{label} — {titles[2]}")
-        ax.legend(fontsize=8)
+    # Panel 3: degree histogram
+    # Percentiles are over per-draw means (shape: n_draws × 31) so the PI
+    # reflects parameter uncertainty only — directly comparable to the observed
+    # mean bars, not inflated by within-draw replicate noise.
+    ax = axes[2]
+    ax.bar(deg_bins, obs_mean_deg, color="gray", alpha=0.5, label="Observed mean", zorder=5)
+    for _, _, pp_d, label, color, ls, hatch in methods:
+        n_draws = len(pp_d) // obs_R
+        pp_d_means = pp_d.reshape(n_draws, obs_R, 31).mean(axis=1)
+        lo = np.percentile(pp_d_means, 5, axis=0)
+        hi = np.percentile(pp_d_means, 95, axis=0)
+        ax.fill_between(deg_bins - 0.5, lo, hi, alpha=0.18, color=color,
+                        hatch=hatch, edgecolor=color, step="post")
+        ax.step(deg_bins - 0.5, pp_d_means.mean(axis=0), color=color, lw=2,
+                ls=ls, where="post", label=label)
+    ax.set(xlabel="Degree", ylabel="Node count", title="Final degree distribution")
+    ax.legend(fontsize=8)
 
     fig.suptitle(
-        "Posterior predictive check — Rejection ABC (top) vs ABC-MCMC (bottom)\n"
-        "Tighter bands in bottom row show ABC-MCMC achieves more precise parameter estimates",
+        "Posterior predictive check — all three observables, all three methods\n"
+        "Gray: observed replicates  |  Black: observed mean  |  Bands: 90% PI (time series: individual replicates; degree: per-draw means)  |  Lines (—  --  -·): PP mean",
         fontsize=11)
     plt.tight_layout()
     plt.savefig(save, dpi=150, bbox_inches="tight")
@@ -886,7 +922,8 @@ def run(
     plot_posterior_widths(raw5_post, adj_post, mcmc_post)
     plot_comparison(rej_post, adj_post, mcmc_post)
     plot_beta_rho_correlation(rej_post, adj_post, mcmc_post)
-    plot_posterior_predictive(mcmc_post, rej_post, inf_obs, rew_obs, deg_obs, obs_R)
+    plot_posterior_predictive(mcmc_post, rej_post, adj_post,
+                              inf_obs, rew_obs, deg_obs, obs_R, rng=rng)
     print("\nAll done.")
 
     return dict(mcmc_posterior=mcmc_post, rej_posterior=rej_post,
