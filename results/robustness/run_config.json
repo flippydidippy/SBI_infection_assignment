@@ -1,0 +1,19 @@
+{
+  "abc_module": "4_Advanced_Methods/4_ABC_MCMC_new.py",
+  "infected_file": "data/infected_timeseries.csv",
+  "rewiring_file": "data/rewiring_timeseries.csv",
+  "degree_file": "data/final_degree_histograms.csv",
+  "seeds": "0,1,2",
+  "scales": "0.05,0.1,0.2",
+  "tolerances": "0.01,0.02,0.05",
+  "distance_metrics": "euclidean,mahalanobis,reweighted",
+  "Nsim": 5000,
+  "n_iter": 5000,
+  "burnin": 1000,
+  "pilot_sims": 500,
+  "pilot_quantile": 0.005,
+  "bank_sims": 200,
+  "output_dir": "results/robustness",
+  "skip_rejection": false,
+  "skip_mcmc": false
+}
