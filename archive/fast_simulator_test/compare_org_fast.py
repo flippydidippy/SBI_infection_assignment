@@ -1,6 +1,6 @@
 import numpy as np
-from org_simulator import simulate
-from fast_sim import simulate_fast
+from archive.fast_simulator_test.org_simulator import simulate
+from archive.fast_simulator_test.fast_sim import simulate_fast
 
 def compare_many(sim1, sim2, *,
                  n_runs=500,
