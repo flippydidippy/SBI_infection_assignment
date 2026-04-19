@@ -147,8 +147,6 @@ This folder is not part of the main workflow, but it preserves earlier simulator
 
 This branch is intentionally organised around the report workflow rather than around a deep package hierarchy.
 
-At the same time, it is **not** just a collection of fully isolated scripts. The code now has a clearer progression of reuse:
-
 - Q2 defines the core fast simulator and the basic data/ABC pipeline,
 - Q3 reuses those foundations and adds competing summary-statistic sets,
 - Q4 builds on both earlier stages, especially the Q2 simulator and the Q3 `S4` summary.
@@ -163,8 +161,6 @@ This gives the repository three advantages:
 
 3. **Section-level reproducibility**  
    Each major stage of the analysis can still be run independently.
-
-In short, the current structure is a deliberate compromise between **clarity**, **report alignment**, and **lightweight modularity**.
 
 ## How to run the analysis
 
