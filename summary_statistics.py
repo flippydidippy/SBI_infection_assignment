@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from basic_rejection_abc.basic_ABC import (
+from basic_ABC import (
     simulate_fast,
     _simulate_replicates_parallel,
     simulate_replicates_fast,
