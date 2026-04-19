@@ -1,90 +1,149 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from concurrent.futures import ProcessPoolExecutor
-import os
+from numba import njit, prange
 
 
 # ============================================================
-# FAST SIMULATOR
+# FAST SIMULATOR  (Numba JIT)
 # ============================================================
 
-def simulate_fast(beta, gamma, rho, N=200, p_edge=0.05, n_infected0=5, T=200, rng=None):
-    if rng is None:
-        rng = np.random.default_rng()
+@njit
+def simulate_fast(beta, gamma, rho, N, p_edge, n_infected0, T):
+    nbrs = np.full((N, N), np.int32(-1), dtype=np.int32)
+    deg  = np.zeros(N, dtype=np.int32)
 
-    upper = rng.random((N, N)) < p_edge
-    upper = np.triu(upper, 1)
-    A = upper | upper.T
+    for i in range(N):
+        for j in range(i + 1, N):
+            if np.random.random() < p_edge:
+                nbrs[i, deg[i]] = j
+                deg[i] += 1
+                nbrs[j, deg[j]] = i
+                deg[j] += 1
 
     state = np.zeros(N, dtype=np.int8)
-    state[rng.choice(N, size=n_infected0, replace=False)] = 1
+    perm  = np.random.permutation(N)
+    for k in range(n_infected0):
+        state[perm[k]] = 1
 
-    infected_fraction = np.zeros(T + 1, dtype=float)
-    rewire_counts = np.zeros(T + 1, dtype=np.int64)
+    infected_fraction = np.zeros(T + 1, dtype=np.float64)
+    rewire_counts     = np.zeros(T + 1, dtype=np.int64)
     infected_fraction[0] = n_infected0 / N
 
-    all_nodes = np.arange(N)
+    si_s = np.empty(N * N, dtype=np.int32)
+    si_i = np.empty(N * N, dtype=np.int32)
 
     for t in range(1, T + 1):
-        i_idx = np.flatnonzero(state == 1)
-        if len(i_idx) == 0:
+        inf_count = 0
+        for i in range(N):
+            if state[i] == 1:
+                inf_count += 1
+        if inf_count == 0:
             break
 
-        # Phase 1: infection
-        infected_neighbor_count = A[:, i_idx].sum(axis=1)
-        p_inf = 1.0 - np.power(1.0 - beta, infected_neighbor_count)
-        state[(state == 0) & (rng.random(N) < p_inf)] = 1
+        inf_nbr = np.zeros(N, dtype=np.int32)
+        for i in range(N):
+            for ki in range(deg[i]):
+                if state[nbrs[i, ki]] == 1:
+                    inf_nbr[i] += 1
 
-        # Phase 2: recovery
-        infected_mask = state == 1
-        state[infected_mask & (rng.random(N) < gamma)] = 2
+        for i in range(N):
+            if state[i] == 0 and inf_nbr[i] > 0:
+                p_inf = 1.0 - (1.0 - beta) ** inf_nbr[i]
+                if np.random.random() < p_inf:
+                    state[i] = 1
 
-        # Phase 3: rewiring — |S|×|I| submatrix
-        s_idx = np.flatnonzero(state == 0)
-        i_idx = np.flatnonzero(state == 1)
+        for i in range(N):
+            if state[i] == 1 and np.random.random() < gamma:
+                state[i] = 2
+
+        n_si = 0
+        for i in range(N):
+            if state[i] == 0:
+                for ki in range(deg[i]):
+                    j = nbrs[i, ki]
+                    if state[j] == 1:
+                        si_s[n_si] = i
+                        si_i[n_si] = j
+                        n_si += 1
 
         rewire_count = 0
-        if len(s_idx) and len(i_idx):
-            A_sub = A[np.ix_(s_idx, i_idx)]
-            sub_rs, sub_cs = np.where(A_sub)
+        for k in range(n_si):
+            if np.random.random() < rho:
+                s_node = int(si_s[k])
+                i_node = int(si_i[k])
+                edge_exists = False
+                for idx in range(deg[s_node]):
+                    if nbrs[s_node, idx] == i_node:
+                        edge_exists = True
+                        break
+                if not edge_exists:
+                    continue
+                for idx in range(deg[s_node]):
+                    if nbrs[s_node, idx] == i_node:
+                        nbrs[s_node, idx] = nbrs[s_node, deg[s_node] - 1]
+                        nbrs[s_node, deg[s_node] - 1] = -1
+                        deg[s_node] -= 1
+                        break
+                for idx in range(deg[i_node]):
+                    if nbrs[i_node, idx] == s_node:
+                        nbrs[i_node, idx] = nbrs[i_node, deg[i_node] - 1]
+                        nbrs[i_node, deg[i_node] - 1] = -1
+                        deg[i_node] -= 1
+                        break
+                n_cand = N - 1 - deg[s_node]
+                if n_cand > 0:
+                    for _ in range(N):
+                        c = int(np.random.random() * N)
+                        if c == s_node:
+                            continue
+                        already = False
+                        for idx in range(deg[s_node]):
+                            if nbrs[s_node, idx] == c:
+                                already = True
+                                break
+                        if not already:
+                            nbrs[s_node, deg[s_node]] = c
+                            deg[s_node] += 1
+                            nbrs[c, deg[c]] = s_node
+                            deg[c] += 1
+                            rewire_count += 1
+                            break
 
-            if len(sub_rs) > 0:
-                sel = rng.random(len(sub_rs)) < rho
-                s_rewire = s_idx[sub_rs[sel]]
-                i_rewire = i_idx[sub_cs[sel]]
-
-                A[s_rewire, i_rewire] = False
-                A[i_rewire, s_rewire] = False
-
-                for s_node in s_rewire:
-                    cand_mask = ~A[s_node]
-                    cand_mask[s_node] = False
-                    candidates = all_nodes[cand_mask]
-                    if candidates.size > 0:
-                        new_partner = rng.choice(candidates)
-                        A[s_node, new_partner] = True
-                        A[new_partner, s_node] = True
-                        rewire_count += 1
-
-        infected_fraction[t] = (state == 1).sum() / N
+        n_inf = 0
+        for i in range(N):
+            if state[i] == 1:
+                n_inf += 1
+        infected_fraction[t] = n_inf / N
         rewire_counts[t] = rewire_count
 
-    degrees = A.sum(axis=1)
-    degree_histogram = np.bincount(np.minimum(degrees, 30), minlength=31)
+    degree_histogram = np.zeros(31, dtype=np.int64)
+    for i in range(N):
+        d = int(min(deg[i], 30))
+        degree_histogram[d] += 1
+
     return infected_fraction, rewire_counts, degree_histogram
 
 
-def simulate_replicates_fast(beta, gamma, rho, R, N=200, p_edge=0.05, n_infected0=5, T=200, rng=None):
+@njit(parallel=True)
+def _simulate_replicates_parallel(beta, gamma, rho, R, N, p_edge, n_infected0, T):
+    infected_arr = np.zeros((R, T + 1))
+    rewiring_arr = np.zeros((R, T + 1))
+    degree_arr   = np.zeros((R, 31))
+    for r in prange(R):
+        inf, rew, deg = simulate_fast(beta, gamma, rho, N, p_edge, n_infected0, T)
+        infected_arr[r] = inf
+        rewiring_arr[r] = rew
+        degree_arr[r]   = deg
+    return infected_arr, rewiring_arr, degree_arr
+
+
+def simulate_replicates_fast(beta, gamma, rho, R, N=200, p_edge=0.05,
+                              n_infected0=5, T=200, rng=None):
     if rng is None:
         rng = np.random.default_rng()
-    results = [simulate_fast(beta=beta, gamma=gamma, rho=rho, N=N,
-                             p_edge=p_edge, n_infected0=n_infected0, T=T, rng=rng)
-               for _ in range(R)]
-    infected_arr = np.array([r[0] for r in results])
-    rewiring_arr = np.array([r[1] for r in results])
-    degree_arr   = np.array([r[2] for r in results])
-    return infected_arr, rewiring_arr, degree_arr
+    np.random.seed(rng.integers(0, 2**31))
+    return _simulate_replicates_parallel(beta, gamma, rho, R, N, p_edge, n_infected0, T)
 
 
 # ============================================================
@@ -206,77 +265,75 @@ def weighted_distance(sim_summary, obs_summary, scale):
 
 
 # ============================================================
-# PARALLEL WORKERS
+# ESTIMATE SCALE + RUN ABC
 # ============================================================
 
-def _scale_worker(args):
-    obs_R, time_stride, seed, summary_key = args
-    rng = np.random.default_rng(seed)
-    beta, gamma, rho = sample_prior(rng)
-    inf_arr, rew_arr, deg_arr = simulate_replicates_fast(beta, gamma, rho, R=obs_R, rng=rng)
-    return SUMMARY_FNS[summary_key](inf_arr, rew_arr, deg_arr, time_stride=time_stride)
-
-
-def _abc_worker(args):
-    obs_summary, obs_R, time_stride, scale, seed, summary_key = args
-    rng = np.random.default_rng(seed)
-    beta, gamma, rho = sample_prior(rng)
-    inf_arr, rew_arr, deg_arr = simulate_replicates_fast(beta, gamma, rho, R=obs_R, rng=rng)
-    sim_summary = SUMMARY_FNS[summary_key](inf_arr, rew_arr, deg_arr, time_stride=time_stride)
-    d = weighted_distance(sim_summary, obs_summary, scale)
-    return beta, gamma, rho, d
-
-
-# ============================================================
-# ESTIMATE SCALE + RUN ABC (parallelised)
-# ============================================================
-
-def estimate_scale(obs_R, summary_key, n_sims=200, time_stride=10, rng=None, n_workers=None):
+def estimate_scale(obs_R, summary_key, n_sims=200, time_stride=10, rng=None):
     if rng is None:
         rng = np.random.default_rng()
-    if n_workers is None:
-        n_workers = os.cpu_count()
-
-    seeds = rng.integers(0, 2**31, size=n_sims)
-    args  = [(obs_R, time_stride, int(s), summary_key) for s in seeds]
-
-    with ProcessPoolExecutor(max_workers=n_workers) as ex:
-        summaries = list(ex.map(_scale_worker, args, chunksize=20))
-
-    summaries = np.array(summaries)
-    scale = summaries.std(axis=0, ddof=1)
+    summaries = []
+    for i in range(n_sims):
+        beta, gamma, rho = sample_prior(rng)
+        inf_arr, rew_arr, deg_arr = simulate_replicates_fast(beta, gamma, rho, R=obs_R, rng=rng)
+        summaries.append(SUMMARY_FNS[summary_key](inf_arr, rew_arr, deg_arr, time_stride=time_stride))
+        if (i + 1) % 50 == 0:
+            print(f"    scale sim {i+1}/{n_sims}")
+    scale = np.array(summaries).std(axis=0, ddof=1)
     scale[scale < 1e-8] = 1.0
     return scale
 
 
 def run_abc(obs_summary, obs_R, summary_key, scale,
             n_draws=5000, accept_frac=0.01, time_stride=10,
-            rng=None, n_workers=None, verbose=True):
+            rng=None, verbose=True):
     if rng is None:
         rng = np.random.default_rng()
-    if n_workers is None:
-        n_workers = os.cpu_count()
-
-    seeds = rng.integers(0, 2**31, size=n_draws)
-    args  = [(obs_summary, obs_R, time_stride, scale, int(s), summary_key) for s in seeds]
-
-    rows = []
-    with ProcessPoolExecutor(max_workers=n_workers) as ex:
-        for i, result in enumerate(ex.map(_abc_worker, args, chunksize=50)):
-            rows.append(result)
-            if verbose and (i + 1) % 500 == 0:
-                print(f"  [{summary_key}] {i+1}/{n_draws}")
-
-    all_draws = np.array(rows)
-    distances = all_draws[:, 3]
-    n_keep    = max(1, int(accept_frac * n_draws))
-    keep_idx  = np.argsort(distances)[:n_keep]
-    return all_draws[keep_idx, :3], distances[keep_idx]
+    params, dists = [], []
+    for i in range(n_draws):
+        beta, gamma, rho = sample_prior(rng)
+        inf_arr, rew_arr, deg_arr = simulate_replicates_fast(beta, gamma, rho, R=obs_R, rng=rng)
+        sim_s = SUMMARY_FNS[summary_key](inf_arr, rew_arr, deg_arr, time_stride=time_stride)
+        params.append((beta, gamma, rho))
+        dists.append(weighted_distance(sim_s, obs_summary, scale))
+        if verbose and (i + 1) % 500 == 0:
+            print(f"  [{summary_key}] {i+1}/{n_draws}")
+    params = np.array(params)
+    dists  = np.array(dists)
+    n_keep = max(1, int(accept_frac * n_draws))
+    idx    = np.argsort(dists)[:n_keep]
+    return params[idx], dists[idx]
 
 
 # ============================================================
 # PLOTS
 # ============================================================
+
+def plot_joint_posterior(samples, title, filename, param_names=("β", "γ", "ρ")):
+    """
+    All three pairwise joint posteriors as scatter plots.
+    Reports posterior correlation for each pair.
+    """
+    prior_bounds = [(0.05, 0.50), (0.02, 0.20), (0.0, 0.8)]
+    pairs = [(0, 2, "β", "ρ"), (0, 1, "β", "γ"), (1, 2, "γ", "ρ")]
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4))
+    for ax, (i, j, xi, xj) in zip(axes, pairs):
+        ax.scatter(samples[:, i], samples[:, j], s=6, alpha=0.4, color="steelblue")
+        corr = np.corrcoef(samples[:, i], samples[:, j])[0, 1]
+        lo_i, hi_i = prior_bounds[i]
+        lo_j, hi_j = prior_bounds[j]
+        ax.set_xlim(lo_i, hi_i)
+        ax.set_ylim(lo_j, hi_j)
+        ax.set_xlabel(xi, fontsize=12)
+        ax.set_ylabel(xj, fontsize=12)
+        ax.set_title(f"{xi}–{xj}  (r = {corr:.3f})")
+
+    fig.suptitle(title, fontsize=11)
+    plt.tight_layout()
+    plt.savefig(filename, dpi=150, bbox_inches="tight")
+    print(f"Saved: {filename}")
+    plt.show()
+
 
 def plot_posterior_comparison(posteriors: dict, param_names=("β", "γ", "ρ"), prior_bounds=None):
     """
@@ -350,6 +407,41 @@ def plot_posterior_widths(posteriors: dict, param_names=("β", "γ", "ρ"), prio
     plt.show()
 
 
+def plot_beta_rho_correlation(posteriors: dict, save="beta_rho_correlation_s1_s4.png"):
+    """
+    β–ρ joint scatter for each summary set side by side.
+    Shows how much confounding the rewiring/degree statistics remove
+    as we go from S1 (infected curve only) to S4 (all scalars).
+    """
+    keys   = list(posteriors.keys())
+    colors = {"S1": "steelblue", "S2": "darkorange", "S3": "seagreen", "S4": "mediumpurple"}
+
+    fig, axes = plt.subplots(1, len(keys), figsize=(4 * len(keys), 4), sharey=True)
+    if len(keys) == 1:
+        axes = [axes]
+
+    for ax, key in zip(axes, keys):
+        post = posteriors[key]
+        corr = np.corrcoef(post[:, 0], post[:, 2])[0, 1]
+        ax.scatter(post[:, 0], post[:, 2], s=6, alpha=0.4,
+                   color=colors.get(key, "gray"))
+        ax.set_xlim(0.05, 0.50)
+        ax.set_ylim(0.00, 0.80)
+        ax.set_xlabel("β", fontsize=12)
+        if ax is axes[0]:
+            ax.set_ylabel("ρ", fontsize=12)
+        ax.set_title(f"{SUMMARY_LABELS[key]}\nr(β, ρ) = {corr:.3f}", fontsize=10)
+
+    fig.suptitle(
+        "β–ρ joint posterior across summary sets\n"
+        "Tighter / rounder cloud = less confounding between β and ρ",
+        fontsize=11)
+    plt.tight_layout()
+    plt.savefig(save, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {save}")
+
+
 def plot_sensitivity(obs_R, seed=42):
     """
     Vary one parameter at a time (others at central values) and plot
@@ -412,13 +504,19 @@ def run_question3(
     rewiring_file="data/rewiring_timeseries.csv",
     degree_file="data/final_degree_histograms.csv",
     summary_keys=("S1", "S2", "S3", "S4"),
-    n_draws=5000,
+    n_draws=20000,
     accept_frac=0.01,
     time_stride=10,
     n_scale_sims=200,
-    seed=123,
+    seed=42,
 ):
     rng = np.random.default_rng(seed)
+
+    print("Compiling Numba simulator...")
+    np.random.seed(0)
+    _ = simulate_fast(0.2, 0.08, 0.3, 50, 0.05, 3, 10)
+    _ = _simulate_replicates_parallel(0.2, 0.08, 0.3, 2, 50, 0.05, 3, 10)
+    print("  Done.\n")
 
     print("Loading observed data...")
     infected_df, rewiring_df, degree_df = load_observed_data(
@@ -469,6 +567,12 @@ def run_question3(
     print("\nGenerating comparison plots...")
     plot_posterior_comparison(posteriors)
     plot_posterior_widths(posteriors)
+    plot_beta_rho_correlation(posteriors)
+    plot_joint_posterior(
+        posteriors["S4"],
+        title="Joint posterior — Rejection ABC (S4)",
+        filename="q3_s4_joint_posterior.png",
+    )
 
     return posteriors
 

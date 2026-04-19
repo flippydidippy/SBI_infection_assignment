@@ -35,7 +35,7 @@ N         = 200
 P_EDGE    = 0.05
 N_INF0    = 5
 T         = 200
-OBS_R     = 10
+OBS_R     = 40
 
 # ============================================================
 # NUMBA SIMULATOR
@@ -448,7 +448,7 @@ def run(seed=42):
     # ---- Method 1: Rejection ABC (5k draws, top 1%) ----
     print("Method 1 — Rejection ABC (5000 draws, top 1%)...")
     rej_post, _, rej_dists, _ = rejection_abc(
-        obs_summary, OBS_R, scale, n_draws=5000, accept_frac=0.01, rng=rng)
+        obs_summary, OBS_R, scale, n_draws=20000, accept_frac=0.01, rng=rng)
     epsilon_rej  = float(rej_dists[-1])
     epsilon_mcmc = epsilon_rej / 2.0
     print(f"  {len(rej_post)} samples  (epsilon_rej={epsilon_rej:.4f})\n")
@@ -456,7 +456,7 @@ def run(seed=42):
     # ---- Method 2: Regression adjustment (5k draws, top 5%) ----
     print("Method 2 — Regression adjustment (5000 draws, top 5%)...")
     rej5_post, rej5_sums, rej5_dists, _ = rejection_abc(
-        obs_summary, OBS_R, scale, n_draws=5000, accept_frac=0.05, rng=rng)
+        obs_summary, OBS_R, scale, n_draws=20000, accept_frac=0.05, rng=rng)
     adj_post = regression_adjust(rej5_post, rej5_sums, obs_summary, rej5_dists)
     print(f"  {len(adj_post)} samples adjusted.\n")
 
