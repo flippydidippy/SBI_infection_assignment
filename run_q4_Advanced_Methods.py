@@ -18,7 +18,7 @@ New in Q4:
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-from basic_ABC import (
+from run_q2_Basic_Rejection_ABC import (
     simulate_fast,
     _simulate_replicates_parallel,
     simulate_replicates_fast as simulate_replicates,
@@ -26,7 +26,7 @@ from basic_ABC import (
     make_observed_arrays,
     weighted_distance,
 )
-from summary_statistics import build_summary_S4 as build_summary
+from run_q3_Summary_Statistics import build_summary_S4 as build_summary
 
 # ============================================================
 # PRIOR

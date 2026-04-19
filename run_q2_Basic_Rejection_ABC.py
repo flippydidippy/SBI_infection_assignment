@@ -1,12 +1,28 @@
+"""
+Basic Rejection ABC
+
+This script implements the baseline rejection-ABC analysis for the adaptive-network
+SIR model used in the report. It combines a Numba-accelerated simulator with a
+simple summary-statistic-based ABC workflow to recover the unknown parameter
+triple (beta, gamma, rho) from partially observed epidemic data.
+
+Main steps
+----------
+1. Load and preprocess the observed infected-fraction, rewiring, and degree data.
+2. Construct the S1 summary statistic: the mean infected-fraction trajectory,
+   down-sampled in time.
+3. Estimate a coordinate-wise normalisation scale from prior-predictive simulations.
+4. Run rejection ABC with draws from the prior and retain the closest samples.
+5. Plot the resulting marginal and joint posterior distributions.
+
+The script is written as a self-contained baseline analysis for Section 2 of the
+report, prioritising readability and direct reproducibility over heavier modularisation.
+"""
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from numba import njit, prange
-
-
-# ============================================================
-# NUMBA SIMULATOR
-# ============================================================
 
 @njit
 def simulate_fast(beta, gamma, rho, N, p_edge, n_infected0, T):
