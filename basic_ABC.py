@@ -261,6 +261,8 @@ def plot_posterior_histograms(samples):
         axes[j].set_ylabel("Density")
         axes[j].legend(fontsize=8)
     plt.tight_layout()
+    plt.savefig("q2_posterior_histograms.png", dpi=150, bbox_inches="tight")
+    print("Saved: q2_posterior_histograms.png")
     plt.show()
 
 
